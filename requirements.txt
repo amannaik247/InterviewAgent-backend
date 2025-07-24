@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+pymongo
+requests
+pymupdf
+fastapi-session
+azure-cognitiveservices-speech
+pydub
