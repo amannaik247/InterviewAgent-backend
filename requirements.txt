@@ -2,8 +2,8 @@ fastapi
 uvicorn
 python-dotenv
 pymongo
+python-multipart
 requests
 pymupdf
-fastapi-session
 azure-cognitiveservices-speech
 pydub
