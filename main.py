@@ -14,6 +14,7 @@ from routes.transcription import transcription_router
 from routes.job import job_router
 from routes.question import question_router
 from routes.evaluate import router as evaluate_router
+from routes.speak import speak_router
 
 app = FastAPI()
 
@@ -48,6 +49,7 @@ app.include_router(transcription_router)
 app.include_router(job_router)
 app.include_router(question_router)
 app.include_router(evaluate_router)
+app.include_router(speak_router)
 
 @app.get("/")
 def read_root():
