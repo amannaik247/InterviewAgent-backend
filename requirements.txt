@@ -5,5 +5,4 @@ pymongo
 python-multipart
 requests
 pymupdf
-azure-cognitiveservices-speech
-pydub
+groq

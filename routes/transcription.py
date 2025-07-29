@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 import os
+import json
 import requests
 import tempfile
-import azure.cognitiveservices.speech as speechsdk
+from groq import Groq
 from db.mongo_client import update_user_session
 from dependencies import get_user_session_data
-from pydub import AudioSegment
 
 transcription_router = APIRouter(prefix="/transcribe")
 
@@ -14,37 +14,34 @@ transcription_router = APIRouter(prefix="/transcribe")
 async def transcribe_audio(request: Request, file: UploadFile = File(...), user_session: dict = Depends(get_user_session_data)):
     try:
         # Save file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
             temp_path = temp_file.name
             temp_file.write(await file.read())
-            
-        # Convert to wav (PCM)
-        audio = AudioSegment.from_file(temp_path, format="webm")
-        wav_path = temp_path.replace(".webm", ".wav")
-        audio.export(wav_path, format="wav")
                     
-        # Set up the speech config and audio config
-        speech_config = speechsdk.SpeechConfig(subscription=os.getenv("AZURE_SPEECH_KEY"), region="centralindia")
-        audio_config = speechsdk.audio.AudioConfig(filename=wav_path)
-        speech_config.speech_recognition_language = "en-IN"
-        
-        # Create the recognizer
-        speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-        result = speech_recognizer.recognize_once()
+        # Initialize the Groq client
+        client = Groq(api_key=os.environ.get("GROQ_STT_API_KEY"))
 
-        # Clean up recognizer and audio config before deleting the file
-        del speech_recognizer
-        del audio_config
+        # Open the audio file
+        try:
+            with open(temp_path, "rb") as file:
+                # Create a transcription of the audio file
+                transcription = client.audio.transcriptions.create(
+                file=file, # Required audio file
+                model="whisper-large-v3-turbo", # Required model to use for transcription
+                prompt="This conversation is an interview",  # Optional
+                response_format="verbose_json",  # Optional
+                timestamp_granularities = ["word", "segment"], # Optional (must set response_format to "json" to use and can specify "word", "segment" (default), or both)
+                language="en",  # Optional
+                temperature=0.0  # Optional
+                )
+
+                text = transcription.text
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Temporary audio file not found.")
+        except IOError as e:
+            raise HTTPException(status_code=500, detail=f"Error reading temporary audio file: {e}")
 
         os.remove(temp_path)
-        
-        if result.reason == speechsdk.ResultReason.RecognizedSpeech:
-            text = result.text
-        elif result.reason == speechsdk.ResultReason.NoMatch:
-            raise HTTPException(status_code=400, detail="No speech could be recognized.")
-        elif result.reason == speechsdk.ResultReason.Canceled:
-            cancellation = result.cancellation_details
-            raise HTTPException(status_code=400, detail=f"Speech Recognition canceled: {cancellation.reason}")
         
         # Store the result in MongoDB messages
         user_id = request.state.user_id

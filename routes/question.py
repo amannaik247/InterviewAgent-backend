@@ -44,7 +44,7 @@ RULES:
 
 5. **Output:**
    - Return only the question (no notes or instructions).
-   - Keep it concise (1–2 sentences max).
+   - Keep the output concise about 20-40 words or (1–2 sentences max).
 """
 
 @question_router.post("/generate")
