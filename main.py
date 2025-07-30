@@ -20,6 +20,11 @@ app = FastAPI()
 
 @app.middleware("http")
 async def add_user_id_header(request: Request, call_next):
+    # Skip user ID generation for health check endpoint
+    if request.url.path == "/health":
+        response = await call_next(request)
+        return response
+
     user_id_from_header = request.headers.get("X-User-ID")
     if not user_id_from_header:
         user_id = str(uuid.uuid4())
