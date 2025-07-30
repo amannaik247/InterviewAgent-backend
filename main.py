@@ -38,7 +38,7 @@ async def add_user_id_header(request: Request, call_next):
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://interview-agent-frontend.vercel.app", "http://localhost:5173"],
+    allow_origins=["https://interview-agent-frontend.vercel.app", "https://get-interviewed.vercel.app", "http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True
