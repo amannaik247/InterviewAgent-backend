@@ -54,3 +54,8 @@ app.include_router(speak_router)
 @app.get("/")
 def read_root():
     return {"message": "Interview API is running"}
+
+@app.get("/health")
+async def health_check():
+    logger.info("Health check endpoint was pinged ✅")
+    return {"health check": "OK"}
