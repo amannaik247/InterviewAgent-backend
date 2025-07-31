@@ -45,6 +45,10 @@ RULES:
 5. **Output:**
    - Return only the question (no notes or instructions).
    - Keep the output concise about 20-40 words or (1–2 sentences max).
+
+6. **Exception:**
+    - If user deflects away from the question and gives a very vague answer, ask them to focus on the interview
+
 """
 
 @question_router.post("/generate")
