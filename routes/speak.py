@@ -25,6 +25,7 @@ async def speak(
         response = client.audio.speech.create(
             model=MODEL,
             voice=voice,
+            speed = 1.2,
             input=text,
             response_format=FORMAT,
         )

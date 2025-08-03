@@ -45,9 +45,7 @@ async def transcribe_audio(request: Request, file: UploadFile = File(...), user_
         
         # Store the result in MongoDB messages
         user_id = request.state.user_id
-        prev_messages = user_session.get("messages", [])
-        prev_messages.append({"role": "user", "content": text})
-        update_user_session(user_id, {"messages": prev_messages})
+        update_user_session(user_id, {"messages": [{"role": "user", "content": text}]})
 
         return JSONResponse(
             status_code=200,
