@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
-def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "llama-3.3-70b-versatile") -> str:
+def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "llama-3.1-8b-instant") -> str:
     """
     Calls Groq API with given prompt and messages
     Returns generated text from API
@@ -17,7 +17,7 @@ def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "lla
     
     payload = {
         "model": model,
-        "messages": [{"role": "system", "content": "You are a helpful assistant."}] + (messages or [])
+        "messages": [{"role": "system", "content": "You are a expert interviewer."}] + (messages or [])
     }
     if prompt:
         payload["messages"].append({"role": "user", "content": prompt})
@@ -37,9 +37,8 @@ def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "lla
         raise Exception(f"Error calling Groq API: {str(e)}")
 
 def evaluate_answer(
-    user_answer: str,
+    conversation_text: str,
     job_description: str,
-    question: str,
     category: str,
     analysis_criteria: str
 ) -> str:
@@ -51,12 +50,11 @@ def evaluate_answer(
     )
 
     user_prompt = (
-        f"Candidate's Answer: {user_answer}\n\n"
+        f"Full Conversation: {conversation_text}\n\n"
         f"Job Description: {job_description}\n\n"
-        f"Interview Question: {question}\n\n"
         f"Evaluation Category: {category}\n"
         f"Analysis Criteria: {analysis_criteria}\n\n"
-        "Please provide a score (1-10) and a 2-sentence summary based on the criteria."
+        "Please provide a score (1-10) and a 2-sentence summary based on the criteria. The evaluation should be based on the entire conversation provided."
     )
 
     messages = [

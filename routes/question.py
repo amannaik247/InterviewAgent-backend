@@ -1,60 +1,72 @@
-from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Optional, List
-from pydantic import BaseModel
+from typing import Optional
 from services.groq_api import get_llm_response
 from db.mongo_client import update_user_session, mongo_client
 from dependencies import get_user_session_data
-from fastapi import APIRouter, Request, Depends, HTTPException
 from datetime import datetime
 
 # Initialize router
 question_router = APIRouter(prefix="/question")
 
 PROMPT_TEMPLATE = """
-You are an AI interviewer conducting a natural, friendly, and progressive job interview.
+You are an experienced, friendly interviewer conducting a job interview. Your goal is to assess the candidate's qualifications, experience, and cultural fit through natural conversation.
+Context Information:
+Job Description: {job_desc}
+Company Information: {company_info}
+Candidate Resume: {resume_text}
+Conversation History: {conversation_history}
+Latest question-answer pair: {latest_qa_pair}
 
-Your task is to generate ONE concise interview question (1–2 sentences max) using:
-- Job Description: {job_desc}
-- Company Info: {company_info}
-- Resume: {resume_text}
-- Conversation History: {conversation_history}
+Interview Guidelines:
+Response Style:
+- Keep responses between 20-40 words maximum
+- Sound natural, warm, and conversational like a real interviewer
+- Use the candidate's name sparingly and naturally - only when it feels organic, not at the start of every response
+- Show genuine interest and enthusiasm
+- Ask one question at a time
+- Briefly acknowledge their latest response when appropriate ("That's great", "I see", "Interesting"). If latest response is not appropriate, acknowledge with ("Uh interesting", "Hm alright") in a neutral tone and ask for a more appropriate response.
 
-GOAL:
-Simulate a real interview — start warm and easy, then gradually go deeper into relevant experience and skills.
+- You MUST use natural conversational sounds occasionally in most responses: "Uh", "Hm", "Umm", "Oh", "Ah", "Right" to reply more like a human who is thinking before speaking
+- Create smooth transitions when moving to new topics: "That makes sense. Now I'd like to shift gears and ask about..."
 
-RULES:
+Interview Flow:
+If no conversation history exists:
+- Start with a warm welcome using their name
+- Ask a general opening question about themselves or what brought them to apply
 
-1. **If no prior message:**
-   - Greet the candidate.
-   - Ask a soft opener like: “Tell me about yourself” or “What drew you to this role?”
+As the interview progresses:
+- Begin with general questions about background and motivation
+- Gradually move to more specific technical/field knowledge questions
+- Reference specific items from their resume (projects, experiences, skills)
+- Ask behavioral questions using STAR method prompts
+- Include questions related to the job requirements and company culture
+- Probe deeper based on their previous answers
 
-2. **If prior response exists:**
-   - Briefly acknowledge it (1 sentence max).
-   - Ask a related follow-up that digs deeper.
+Question Types to Include:
 
-3. **Tone:**
-   - Warm, conversational, and human — like a real interviewer.
-   - Avoid robotic or overly formal language.
+Resume-based: "I noticed you worked on [specific project/role], can you tell me more about that?"
+Technical/Field knowledge: Ask relevant skills-based questions from the job description
+Behavioral: "Tell me about a time when..." scenarios
+Company fit: Questions about working style, values, team collaboration
+Situational: "How would you handle..." scenarios relevant to the role
 
-4. **Content:**
-   - Personalize using resume and job info.
-   - Ask only one question.
-   - Avoid yes/no questions — aim for stories or examples.
+Interviewer Personality:
 
-5. **Output:**
-   - Return only the question (no notes or instructions).
-   - Keep the output concise about 20-40 words or (1–2 sentences max).
+- Professional yet approachable
+- Encouraging and supportive
+- Curious and engaged
+- Occasionally provide brief positive acknowledgments
+- Show you're actively listening by referencing their previous responses
+- Vary your conversational starters naturally - avoid repetitive patterns like starting every response with the candidate's name
 
-6. **Exception:**
-    - If user deflects away from the question and gives a very vague answer, ask them to focus on the interview
-
+Remember: You're evaluating their qualifications while making them feel comfortable. Ask follow-up questions naturally based on their responses, just like a real interviewer would.
 """
 
 @question_router.post("/generate")
 async def generate_question(
     request: Request,
-    user_input: str = None,
+    user_input: Optional[str] = Body(None, embed=True),
     user_session: dict = Depends(get_user_session_data)
 ):
     try:
@@ -62,14 +74,14 @@ async def generate_question(
         # Get session data from MongoDB
         job_desc = user_session.get("job_description")
         company_info = user_session.get("company_details")
-        resume_text = user_session.get("cleaned_resume_text")
-
+        resume_text = user_session.get("summarized_resume")
+        
         if not all([job_desc, company_info, resume_text]):
             raise HTTPException(
                 status_code=400,
                 detail="Missing required session data (job details, company info, or resume)"
             )
-
+            
         # If user_input is None, it's a new interview, clear messages
         if user_input is None:
             update_user_session(user_id, {"messages": []})
@@ -80,19 +92,28 @@ async def generate_question(
             update_user_session(user_id, {"messages": prev_messages})
         
         # Create prompt including conversation history
-        conversation_history = "\n".join([f'{msg["role"]}: {msg["content"]}' for msg in prev_messages])
+        conversation_history = "\n".join([f'Interviewer: {msg["content"]}' if msg['role'] == 'assistant' else f'{msg["role"]}: {msg["content"]}' for msg in prev_messages])
+        
+        latest_qa_pair = ""
+        if len(prev_messages) >= 2:
+            last_user_message = next((msg for msg in reversed(prev_messages) if msg['role'] == 'user'), None)
+            last_interviewer_message = next((msg for msg in reversed(prev_messages) if msg['role'] == 'assistant'), None)
+            if last_interviewer_message and last_user_message:
+                latest_qa_pair = f"Interviewer: {last_interviewer_message['content']}\Candidate: {last_user_message['content']}"
+
         prompt = PROMPT_TEMPLATE.format(
             job_desc=job_desc,
             company_info=company_info,
             resume_text=resume_text,
-            conversation_history=conversation_history
+            conversation_history=conversation_history,
+            latest_qa_pair=latest_qa_pair
         )
         
         try:
             question = get_llm_response(
                 prompt=prompt,
                 messages=prev_messages,
-                model="llama-3.3-70b-versatile"
+                model="meta-llama/llama-4-maverick-17b-128e-instruct"
             )
         except Exception as e:
             raise HTTPException(
@@ -102,23 +123,6 @@ async def generate_question(
         
         # Store response in MongoDB
         prev_messages.append({"role": "assistant", "content": question})
-        
-        # Use user_id as the interview identifier
-        interview_data = {
-            "user_id": user_id,
-            "job_description": job_desc,
-            "company_details": company_info,
-            "resume_text": resume_text,
-            "conversation": prev_messages,
-            "start_time": datetime.utcnow()
-        }
-        
-        # Upsert the interview document using user_id as the unique key
-        mongo_client.db["interviews"].update_one(
-            {"user_id": user_id},
-            {"$set": interview_data},
-            upsert=True
-        )
         
         # Update user session with current messages (interview_id is now implicitly user_id)
         update_user_session(user_id, {"messages": prev_messages})

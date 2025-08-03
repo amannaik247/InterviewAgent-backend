@@ -29,11 +29,20 @@ class MongoDBClient:
         return self.get_user_session_collection().find_one({"user_id": user_id})
 
     def update_user_session(self, user_id: str, data: dict):
-        self.get_user_session_collection().update_one(
-            {"user_id": user_id},
-            {"$set": data},
-            upsert=True
-        )
+        if "messages" in data and isinstance(data["messages"], list):
+            # For messages, use $addToSet to prevent duplicates
+            self.get_user_session_collection().update_one(
+                {"user_id": user_id},
+                {"$addToSet": {"messages": {"$each": data["messages"]}}},
+                upsert=True
+            )
+        else:
+            # For other data, use regular $set
+            self.get_user_session_collection().update_one(
+                {"user_id": user_id},
+                {"$set": data},
+                upsert=True
+            )
 
 # Singleton export
 mongo_client = MongoDBClient()

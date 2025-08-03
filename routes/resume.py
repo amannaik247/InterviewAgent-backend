@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile
 from db.mongo_client import update_user_session
 from dependencies import get_user_session_data
+from services.groq_api import get_llm_response
 import datetime
 import fitz  # PyMuPDF
 import tempfile
@@ -17,6 +18,37 @@ def clean_resume_text(raw_text: str) -> str:
     lines = [line.strip() for line in text.splitlines()]
     non_empty_lines = [line for line in lines if line]
     return "\n".join(non_empty_lines)
+
+def summarize_resume(resume_text: str) -> str:
+    prompt = f"""
+    Extract key information from this resume in a structured format for LLM processing:
+
+    REQUIRED SECTIONS:
+    - Name (full name only, no contact info)
+    - Education (degrees, institutions, graduation years)
+    - Work Experience (company, title, duration, 2-3 key responsibilities each)
+    - Projects (name, technologies, brief outcome)
+    - Skills (technical skills only, categorized)
+    - Certifications (if any)
+
+    OUTPUT FORMAT:
+    Use clear headings with ** and bullet points. Keep each bullet point to 1-2 lines maximum. Be extremely concise - use short, impactful sentences with key details only. If a section is missing, write "Not specified". Focus on quantifiable achievements and technical details. Avoid unnecessary words and filler content and gaps in lines
+
+    Resume text:
+    {resume_text}
+    """
+    try:
+        summary = get_llm_response(
+            prompt=prompt,
+            messages=[],
+            model="meta-llama/llama-4-maverick-17b-128e-instruct"
+        )
+        return summary
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to summarize resume: {str(e)}"
+        )
 
 @router.post("/upload", tags=["Resume"])
 async def upload_resume(request: Request, file: UploadFile, user_session: dict = Depends(get_user_session_data)):
@@ -51,7 +83,10 @@ async def upload_resume(request: Request, file: UploadFile, user_session: dict =
         # Clean text for session use
         cleaned_text = clean_resume_text(full_text)
         user_id = request.state.user_id
-        update_user_session(user_id, {"cleaned_resume_text": cleaned_text}) # Store full cleaned text
+        # Summarize the cleaned resume text
+        summarized_resume = summarize_resume(cleaned_text)
+        # Store the summarized resume in the user session
+        update_user_session(user_id, {"summarized_resume": summarized_resume})
 
         return {
             "success": True,
@@ -60,7 +95,7 @@ async def upload_resume(request: Request, file: UploadFile, user_session: dict =
                 "id": str(result.inserted_id),
                 "filename": file.filename,
                 "page_count": len(text_pages),
-                "snippet": cleaned_text[:500] + "..." if len(cleaned_text) > 500 else cleaned_text
+                "snippet": summarized_resume[:500] + "..." if len(summarized_resume) > 500 else summarized_resume
             }
         }
 

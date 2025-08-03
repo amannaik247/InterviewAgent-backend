@@ -5,6 +5,7 @@ from db.mongo_client import mongo_client
 from services.groq_api import evaluate_answer
 from fastapi import APIRouter, Depends, HTTPException
 from dependencies import get_user_id
+from db.mongo_client import get_user_session, update_user_session
 
 router = APIRouter()
 
@@ -25,23 +26,17 @@ class ConversationEntry(BaseModel):
 
 @router.post("/evaluate", response_model=AnalysisResult)
 async def evaluate_interview(user_id: str = Depends(get_user_id)):
-    interview_collection = mongo_client.db["interviews"]
-    interview_data = interview_collection.find_one({"user_id": user_id})
+    user_session = get_user_session(user_id)
+    if not user_session:
+        raise HTTPException(status_code=404, detail="User session not found")
 
-    if not interview_data:
-        raise HTTPException(status_code=404, detail="Interview not found")
-
-    conversation: List[ConversationEntry] = interview_data.get("conversation", [])
+    conversation: List[ConversationEntry] = user_session.get("messages", [])
     if not conversation:
         raise HTTPException(status_code=400, detail="No conversation data found for evaluation")
         
-    job_description = interview_data.get("job_description", "")
+    job_description = user_session.get("job_description", "")
     full_conversation_text = "\n".join([f"{entry['role']}: {entry['content']}" for entry in conversation])
-
-    # Extract the last user answer and the last question from the conversation
-    user_answer = next((entry['content'] for entry in reversed(conversation) if entry['role'] == 'user'), "")
-    question = next((entry['content'] for entry in reversed(conversation) if entry['role'] == 'assistant'), "")
-
+    
     categories = {
         "communication_clarity": {
             "prompt": "Analyze the candidate's communication and clarity. Score from 1-10. Summarize in 2 sentences: Sentence structure, clarity, filler words, fluency, answer length, coherence, logical flow."
@@ -64,9 +59,8 @@ async def evaluate_interview(user_id: str = Depends(get_user_id)):
     for category_name, category_info in categories.items():
         try:
             llm_response = evaluate_answer(
-                user_answer=user_answer,
+                conversation_text=full_conversation_text,
                 job_description=job_description,
-                question=question,
                 category=category_name,
                 analysis_criteria=category_info['prompt']
             )
@@ -79,10 +73,7 @@ async def evaluate_interview(user_id: str = Depends(get_user_id)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"LLM evaluation failed for {category_name}: {str(e)}")
 
-    # Update MongoDB with the analysis results
-    interview_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"analysis": analysis_results}}
-    )
+    # Update user session with the analysis results
+    update_user_session(user_id, {"analysis": analysis_results})
 
     return AnalysisResult(**analysis_results)
