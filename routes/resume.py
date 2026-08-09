@@ -7,6 +7,9 @@ import fitz  # PyMuPDF
 import tempfile
 import os
 import re
+import traceback
+import logging
+logger = logging.getLogger(__name__)
 
 from db.mongo_client import get_collection
 
@@ -51,42 +54,51 @@ def summarize_resume(resume_text: str) -> str:
         )
 
 @router.post("/upload", tags=["Resume"])
-async def upload_resume(request: Request, file: UploadFile, user_session: dict = Depends(get_user_session_data)):
-    try:
-        # Save PDF temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-            contents = await file.read()
-            temp_file.write(contents)
-            temp_file.flush()
-            temp_path = temp_file.name
+async def upload_resume(
+    request: Request,
+    file: UploadFile,
+    user_session: dict = Depends(get_user_session_data),
+):
+    # Validate file type
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(
+            status_code=400, detail="Only PDF files are supported."
+        )
 
-        # Extract raw text
+    try:
+        # Read file directly into memory (No temp file created)
+        contents = await file.read()
+
+        # Extract raw text directly from byte stream
         text_pages = []
-        with fitz.open(temp_path) as doc:
+        with fitz.open(stream=contents, filetype="pdf") as doc:
             for page in doc:
                 text_pages.append(page.get_text())
 
         full_text = "\n\n".join(text_pages)
-        os.remove(temp_path)
 
         # Store raw text in MongoDB
         resume_doc = {
             "filename": file.filename,
-            "text_content": full_text,  # Raw form saved
+            "text_content": full_text,
             "page_count": len(text_pages),
-            "upload_time": datetime.datetime.utcnow()
+            "upload_time": datetime.datetime.now(datetime.timezone.utc),
         }
 
         collection = get_collection("resumes")
         result = collection.insert_one(resume_doc)
 
-        # Clean text for session use
+        # Clean and process text
         cleaned_text = clean_resume_text(full_text)
         user_id = request.state.user_id
-        # Summarize the cleaned resume text
+
+        # Summarize resume
         summarized_resume = summarize_resume(cleaned_text)
-        # Store the summarized resume in the user session
-        update_user_session(user_id, {"summarized_resume": summarized_resume})
+
+        # Update session
+        update_user_session(
+            user_id, {"summarized_resume": summarized_resume}
+        )
 
         return {
             "success": True,
@@ -95,9 +107,20 @@ async def upload_resume(request: Request, file: UploadFile, user_session: dict =
                 "id": str(result.inserted_id),
                 "filename": file.filename,
                 "page_count": len(text_pages),
-                "snippet": summarized_resume[:500] + "..." if len(summarized_resume) > 500 else summarized_resume
-            }
+                "snippet": (
+                    summarized_resume[:500] + "..."
+                    if len(summarized_resume) > 500
+                    else summarized_resume
+                ),
+            },
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Resume processing failed: {e}")
+        # Print the exact line and error in your deployment/console logs
+        logger.error(f"Error processing resume: {str(e)}")
+        logger.error(traceback.format_exc())
+
+        # Return explicit error message in JSON payload
+        raise HTTPException(
+            status_code=500, detail=f"Resume processing failed: {str(e)}"
+        )
