@@ -1,3 +1,5 @@
+import logging
+import traceback
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Optional
@@ -5,6 +7,8 @@ from services.groq_api import get_llm_response
 from db.mongo_client import update_user_session, mongo_client
 from dependencies import get_user_session_data
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Initialize router
 question_router = APIRouter(prefix="/question")
@@ -70,7 +74,10 @@ async def generate_question(
     user_session: dict = Depends(get_user_session_data)
 ):
     try:
-        user_id = request.state.user_id
+        user_id = getattr(request.state, "user_id", None) or request.headers.get("X-User-ID")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Missing user_id in request state or headers")
+
         # Get session data from MongoDB
         job_desc = user_session.get("job_description")
         company_info = user_session.get("company_details")
@@ -99,7 +106,7 @@ async def generate_question(
             last_user_message = next((msg for msg in reversed(prev_messages) if msg['role'] == 'user'), None)
             last_interviewer_message = next((msg for msg in reversed(prev_messages) if msg['role'] == 'assistant'), None)
             if last_interviewer_message and last_user_message:
-                latest_qa_pair = f"Interviewer: {last_interviewer_message['content']}\Candidate: {last_user_message['content']}"
+                latest_qa_pair = f"Interviewer: {last_interviewer_message['content']}\nCandidate: {last_user_message['content']}"
 
         prompt = PROMPT_TEMPLATE.format(
             job_desc=job_desc,
@@ -116,9 +123,10 @@ async def generate_question(
                 model="meta-llama/llama-4-maverick-17b-128e-instruct"
             )
         except Exception as e:
+            logger.error(f"LLM generation failed: {traceback.format_exc()}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to generate question: {str(e)}"
+                detail=f"Failed to generate question from LLM: {str(e)}"
             )
         
         # Store response in MongoDB
@@ -135,8 +143,14 @@ async def generate_question(
             }
         )
         
+    except HTTPException as http_exc:
+        # Re-raise HTTPExceptions directly so status code (e.g. 400 Bad Request) is preserved
+        raise http_exc
     except Exception as e:
+        error_trace = traceback.format_exc()
+        logger.error(f"Error in /question/generate: {error_trace}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error generating question: {str(e)}"
+            detail=f"Error generating question: {str(e)} | Traceback: {error_trace}"
         )
+
