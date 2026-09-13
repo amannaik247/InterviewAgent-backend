@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 
-def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "llama-3.1-8b-instant") -> str:
+def get_llm_response(prompt: str, messages: list[dict] = None, model: str = "openai/gpt-oss-20b") -> str:
     """
     Calls Groq API with given prompt and messages
     Returns generated text from API

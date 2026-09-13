@@ -6,3 +6,4 @@ python-multipart
 requests
 pymupdf
 groq
+google-genai

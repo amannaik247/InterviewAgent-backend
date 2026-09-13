@@ -44,7 +44,6 @@ def summarize_resume(resume_text: str) -> str:
         summary = get_llm_response(
             prompt=prompt,
             messages=[],
-            model="llama-3.1-8b-instant"
         )
         return summary
     except Exception as e:

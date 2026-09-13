@@ -81,12 +81,19 @@ async def generate_question(
         # Get session data from MongoDB
         job_desc = user_session.get("job_description")
         company_info = user_session.get("company_details")
-        resume_text = user_session.get("summarized_resume")
-        
-        if not all([job_desc, company_info, resume_text]):
+        resume_text = user_session.get("summarized_resume") or user_session.get("resume_text") or "Standard candidate background and experience"
+
+        missing = []
+        if not job_desc:
+            missing.append("job_description")
+        if not company_info:
+            missing.append("company_details")
+
+        if missing:
+            logger.warning(f"User {user_id} missing session keys: {missing}. Found keys in session: {list(user_session.keys())}")
             raise HTTPException(
                 status_code=400,
-                detail="Missing required session data (job details, company info, or resume)"
+                detail=f"Missing required session data ({', '.join(missing)}). Please submit job details first."
             )
             
         # If user_input is None, it's a new interview, clear messages
@@ -120,7 +127,6 @@ async def generate_question(
             question = get_llm_response(
                 prompt=prompt,
                 messages=prev_messages,
-                model="meta-llama/llama-4-maverick-17b-128e-instruct"
             )
         except Exception as e:
             logger.error(f"LLM generation failed: {traceback.format_exc()}")

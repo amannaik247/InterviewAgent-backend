@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -26,11 +29,11 @@ async def add_user_id_header(request: Request, call_next):
         return response
 
     user_id_from_header = request.headers.get("X-User-ID")
-    if not user_id_from_header:
+    if not user_id_from_header or user_id_from_header.strip().lower() in ("null", "undefined", "none", ""):
         user_id = str(uuid.uuid4())
         logger.info(f"Generated new user_id: {user_id}")
     else:
-        user_id = user_id_from_header
+        user_id = user_id_from_header.strip()
         logger.info(f"Using user_id from header: {user_id}")
 
     request.state.user_id = user_id

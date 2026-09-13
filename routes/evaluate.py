@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from db.mongo_client import mongo_client
-from services.groq_api import evaluate_answer
+from services.groq_api import evaluate_answer, get_llm_response
 from fastapi import APIRouter, Depends, HTTPException
 from dependencies import get_user_id
 from db.mongo_client import get_user_session, update_user_session
@@ -14,6 +14,8 @@ class AnalysisCategory(BaseModel):
     summary: str
 
 class AnalysisResult(BaseModel):
+    overall_score: float
+    overall_summary: str
     communication_clarity: AnalysisCategory
     role_specific_knowledge: AnalysisCategory
     problem_solving_critical_thinking: AnalysisCategory
@@ -73,7 +75,25 @@ async def evaluate_interview(user_id: str = Depends(get_user_id)):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"LLM evaluation failed for {category_name}: {str(e)}")
 
-    # Update user session with the analysis results
-    update_user_session(user_id, {"analysis": analysis_results})
+    # Compute overall score as rounded average
+    overall_score = round(sum(v["score"] for v in analysis_results.values()) / len(analysis_results), 1)
 
-    return AnalysisResult(**analysis_results)
+    # Generate holistic interviewer summary via LLM
+    summary_prompt = (
+        f"Full Conversation: {full_conversation_text}\n\n"
+        f"Job Description: {job_description}\n\n"
+        f"Category Scores: " + ", ".join(f"{k}: {v['score']}/10" for k, v in analysis_results.items()) + "\n\n"
+        "As the interviewer, write a concise 3-4 sentence overall opinion of this candidate. "
+        "Highlight their strongest quality, one area for improvement, and whether you would recommend them. "
+        "Speak directly as the interviewer (e.g., 'The candidate...'). Output only the summary text, no labels or prefixes."
+    )
+    try:
+        overall_summary = get_llm_response(prompt=summary_prompt)
+    except Exception:
+        overall_summary = "Overall summary could not be generated."
+
+    # Update user session with the analysis results
+    full_analysis = {"overall_score": overall_score, "overall_summary": overall_summary, **analysis_results}
+    update_user_session(user_id, {"analysis": full_analysis})
+
+    return AnalysisResult(overall_score=overall_score, overall_summary=overall_summary, **analysis_results)
