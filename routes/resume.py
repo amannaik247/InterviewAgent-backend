@@ -3,7 +3,7 @@ from db.mongo_client import update_user_session
 from dependencies import get_user_session_data
 from services.groq_api import get_llm_response
 import datetime
-import fitz  # PyMuPDF
+import pymupdf  # PyMuPDF
 import tempfile
 import os
 import re
@@ -70,7 +70,7 @@ async def upload_resume(
 
         # Extract raw text directly from byte stream
         text_pages = []
-        with fitz.open(stream=contents, filetype="pdf") as doc:
+        with pymupdf.open(stream=contents, filetype="pdf") as doc:
             for page in doc:
                 text_pages.append(page.get_text())
 
