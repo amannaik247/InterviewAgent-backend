@@ -58,16 +58,23 @@ async def upload_resume(
     file: UploadFile,
     user_session: dict = Depends(get_user_session_data),
 ):
-    # Validate file type
-    if not file.filename.endswith(".pdf"):
+    # Validate file type (case-insensitive)
+    filename = file.filename.lower() if file.filename else ""
+    if not filename.endswith(".pdf"):
         raise HTTPException(
             status_code=400, detail="Only PDF files are supported."
         )
 
-    try:
-        # Read file directly into memory (No temp file created)
-        contents = await file.read()
+    # Validate file size (5 MB limit to match frontend)
+    contents = await file.read()
+    file_size = len(contents)
+    max_size = 5 * 1024 * 1024  # 5 MB
+    if file_size > max_size:
+        raise HTTPException(
+            status_code=400, detail=f"File too large. Maximum file size is 5 MB. Received {file_size} bytes."
+        )
 
+    try:
         # Extract raw text directly from byte stream
         text_pages = []
         with pymupdf.open(stream=contents, filetype="pdf") as doc:
@@ -114,6 +121,12 @@ async def upload_resume(
             },
         }
 
+    except pymupdf.FileDataError as e:
+        # Handle invalid/corrupted PDF files
+        logger.error(f"Invalid PDF file: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail="Invalid or corrupted PDF file."
+        )
     except Exception as e:
         # Print the exact line and error in your deployment/console logs
         logger.error(f"Error processing resume: {str(e)}")
